@@ -20,6 +20,13 @@ import re
 import shutil
 import sys
 
+# Windows runner 上 Python 默认用 cp1252 输出，打印中文会直接崩，这里强制 UTF-8
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 ROOT = os.getcwd()
 BRAND_FILE = os.path.join(ROOT, "brand.json")
 ASSETS = os.path.join(ROOT, "branding", "assets")
