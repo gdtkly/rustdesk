@@ -1,0 +1,193 @@
+# 连连控远程 —— Windows 安装包云端构建
+#
+# 用法：把本文件放在 rustdesk 源码仓库（你自己的 fork）的 .github/workflows/ 下，
+#       在 Actions 页面手动触发即可。构建产物是一个 EXE 安装包 + 免安装压缩包。
+#
+# 说明：本仓库必须是 rustdesk 的 fork（或完整源码），因为下面两个可复用工作流
+#       依赖仓库自带的 .github/workflows/bridge.yml 等文件。
+
+name: 构建连连控远程-Windows
+
+on:
+  workflow_dispatch:
+
+env:
+  VERSION: "1.4.9"
+  LLVM_VERSION: "15.0.6"
+  FLUTTER_VERSION: "3.24.5"
+  RUST_VERSION: "1.75"
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+jobs:
+  # 生成 flutter_rust_bridge 绑定（官方标准流程，生成物会覆盖到源码里）
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  # 编译 RustDeskTempTopMostWindow.exe（提权弹窗置顶用，打包时必须带上）
+  build-topmost-window:
+    uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
+    with:
+      upload-artifact: true
+      target: windows-2022
+      configuration: Release
+      platform: x64
+      target_version: Windows10
+
+  build-windows:
+    name: 编译并打包 (x64)
+    needs: [generate-bridge, build-topmost-window]
+    runs-on: windows-2022
+    timeout-minutes: 150
+
+    steps:
+      - name: 导出 Actions 缓存变量
+        uses: actions/github-script@v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: 拉取源码
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: 还原 bridge 生成文件
+        uses: actions/download-artifact@v4
+        with:
+          name: bridge-artifact
+          path: ./
+
+      # ↓↓↓ 换品牌：改名、换图标、换主色、写死服务器地址 ↓↓↓
+      - name: 应用品牌化补丁
+        shell: bash
+        run: |
+          python branding/apply_branding.py
+          echo "---- 关键改动确认 ----"
+          grep -n "APP_NAME\|RENDEZVOUS_SERVERS\|RS_PUB_KEY" libs/hbb_common/src/config.rs
+          grep -n "ProductName\|CompanyName" flutter/windows/runner/Runner.rc
+
+      - name: 安装 LLVM / Clang
+        uses: KyleMayes/install-llvm-action@v2.0.9
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: 安装 Flutter
+        id: flutter
+        uses: subosito/flutter-action@v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: x64
+
+      - name: 换成 RustDesk 定制 Flutter 引擎
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/* C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+
+      - name: 给 Flutter 打下拉框补丁
+        shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+          components: "rustfmt"
+
+      - name: 缓存 Rust 依赖
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: windows-x64
+
+      - name: 准备 vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: 安装 vcpkg 依赖 (ffmpeg/vpx/opus/aom...)
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        shell: bash
+        run: |
+          if ! "$VCPKG_ROOT/vcpkg" install --triplet x64-windows-static --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do echo "$_1:"; cat "$_1"; done
+            exit 1
+          fi
+
+      - name: 编译 RustDesk（最耗时，约 25-40 分钟）
+        run: |
+          python .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+          mv ./flutter/build/windows/x64/runner/Release ./rustdesk
+          dir ./rustdesk
+
+      - name: 附带虚拟显示器驱动 (usbmmidd)
+        run: |
+          Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+          Expand-Archive usbmmidd_v2.zip -DestinationPath .
+          Remove-Item -Path usbmmidd_v2\Win32 -Recurse -ErrorAction SilentlyContinue
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe","usbmmidd_v2\deviceinstaller.exe","usbmmidd_v2\usbmmidd.bat" -ErrorAction SilentlyContinue
+          mv -Force .\usbmmidd_v2 ./rustdesk
+
+      - name: 附带远程打印驱动（失败不影响主流程）
+        continue-on-error: true
+        run: |
+          Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip -OutFile drv.zip
+          Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip -OutFile adapter.zip
+          Expand-Archive drv.zip -DestinationPath .
+          New-Item -ItemType Directory -Force -Path ./rustdesk/drivers | Out-Null
+          mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
+          Expand-Archive adapter.zip -DestinationPath .
+          mv -Force .\printer_driver_adapter.dll ./rustdesk
+
+      - name: 复制 Runner.res（携带版本信息）
+        continue-on-error: true
+        shell: bash
+        run: |
+          runner_res=$(find . -name "Runner.res" | head -1)
+          if [ -n "$runner_res" ]; then cp "$runner_res" ./libs/portable/Runner.res; fi
+
+      - name: 带上 TopMostWindow 组件
+        uses: actions/download-artifact@v4
+        with:
+          name: topmostwindow-artifacts-x64
+          path: ./rustdesk
+
+      - name: 生成自解压 EXE 安装包
+        shell: bash
+        run: |
+          sed -i '/dpiAware/d' res/manifest.xml
+          cd ./libs/portable
+          pip install -r requirements.txt
+          python ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          cd ../..
+          mkdir -p dist
+          cp ./target/release/rustdesk-portable-packer.exe "dist/连连控远程_v${VERSION}_x64_安装包.exe"
+          cp ./target/release/rustdesk-portable-packer.exe "dist/LLK-Remote-v${VERSION}-x64-setup.exe"
+
+      - name: 打包免安装绿色版
+        shell: pwsh
+        run: |
+          Compress-Archive -Path ./rustdesk/* -DestinationPath "dist/连连控远程_v${{ env.VERSION }}_x64_绿色版.zip" -Force
+
+      - name: 计算校验值
+        shell: bash
+        run: |
+          cd dist && sha256sum * | tee SHA256SUMS.txt
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: 连连控远程-Windows-x64
+          path: dist/
+          retention-days: 30
