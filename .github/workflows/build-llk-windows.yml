@@ -62,6 +62,9 @@ jobs:
       # ↓↓↓ 换品牌：改名、换图标、换主色、写死服务器地址 ↓↓↓
       - name: 应用品牌化补丁
         shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
         run: |
           python branding/apply_branding.py
           echo "---- 关键改动确认 ----"
@@ -132,6 +135,7 @@ jobs:
           dir ./rustdesk
 
       - name: 附带虚拟显示器驱动 (usbmmidd)
+        continue-on-error: true
         run: |
           Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
           Expand-Archive usbmmidd_v2.zip -DestinationPath .
