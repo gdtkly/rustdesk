@@ -1,0 +1,18 @@
+{
+  "_说明": "改这里的值就能换品牌。改完重新跑构建即可，不需要动源码。",
+  "app_name": "连连控远程",
+  "app_name_short": "连连控",
+  "company_name": "丰顺成大网络科技有限公司",
+  "copyright": "Copyright © 2026 丰顺成大网络科技有限公司 版权所有",
+  "file_description": "连连控远程 - 远程桌面控制",
+  "brand_color": "#0FA968",
+
+  "_server说明": "自建服务器地址与公钥。relay 默认复用该地址，端口 21116/21117。",
+  "server_ip": "120.79.178.237",
+  "server_key": "CA1z+gwXxeIItvawtMUnR4s9fFIlgYtqvU0643ENjyI=",
+
+  "rustdesk_version": "1.4.9",
+  "output_basename": "连连控远程",
+
+  "logo_source": ""
+}
