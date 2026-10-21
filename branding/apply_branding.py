@@ -61,6 +61,27 @@ def sub(path, pattern, repl, label, count=1, flags=re.M):
         changed.append(f"{label}  -> {path}")
 
 
+def ensure_key(path, key, value, after_key="LegalCopyright", label=""):
+    """Cargo.toml 的 winres 段里有这项就替换，没有就插到 after_key 后面"""
+    p = os.path.join(ROOT, path)
+    if not os.path.exists(p):
+        failed.append(f"{label}: 文件不存在 {path}")
+        return
+    src = read(p)
+    if re.search(rf'(?m)^\s*{key}\s*=', src):
+        new = re.sub(rf'(?m)^(\s*{key}\s*=\s*)"[^"]*"',
+                     lambda m: f'{m.group(1)}"{value}"', src, count=1)
+    else:
+        new, n = re.subn(rf'(?m)^(\s*{after_key}\s*=\s*"[^"]*")',
+                         lambda m: f'{m.group(1)}\n{key} = "{value}"', src, count=1)
+        if n == 0:
+            failed.append(f"{label}: 找不到插入锚点 {after_key} ({path})")
+            return
+    if new != src:
+        write(p, new)
+        changed.append(f"{label}  -> {path}")
+
+
 def main():
     brand = json.load(open(BRAND_FILE, encoding="utf-8"))
     app_name = brand["app_name"]
@@ -142,6 +163,9 @@ def main():
             r'(?m)^(\s*' + k + r'\s*=\s*)"[^"]*"',
             lambda m, v=v: f'{m.group(1)}"{v}"',
             f"portable/Cargo.toml/{k}")
+    # winres 模板里没有 CompanyName，需要插入，否则安装包属性里公司名是空的
+    ensure_key(pk, "CompanyName", company, "LegalCopyright", "portable/Cargo.toml/CompanyName")
+    ensure_key("Cargo.toml", "CompanyName", company, "LegalCopyright", "Cargo.toml/CompanyName")
 
     # ---------- 3. 主题主色 ----------
     dart = "flutter/lib/common.dart"
