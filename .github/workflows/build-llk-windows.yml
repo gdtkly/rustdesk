@@ -132,7 +132,11 @@ jobs:
         run: |
           python .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
-          dir ./rustdesk
+          # 关键：把 exe 直接命名成产品名。
+          # RustDesk 的安装逻辑会去 {安装目录}\{应用名}.exe 找自己，
+          # 若仍叫 rustdesk.exe，安装完会"找不到程序"直接退出。
+          Rename-Item -Path ".\rustdesk\rustdesk.exe" -NewName "连连控远程.exe"
+          dir ./rustdesk\*.exe
 
       - name: 附带虚拟显示器驱动 (usbmmidd)
         continue-on-error: true
@@ -171,13 +175,17 @@ jobs:
         shell: bash
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
+          ls -l ./rustdesk/*.exe
           cd ./libs/portable
           pip install -r requirements.txt
-          python ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          python ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/连连控远程.exe"
           cd ../..
           mkdir -p dist
-          cp ./target/release/rustdesk-portable-packer.exe "dist/连连控远程_v${VERSION}_x64_安装包.exe"
-          cp ./target/release/rustdesk-portable-packer.exe "dist/LLK-Remote-v${VERSION}-x64-setup.exe"
+          # 文件名必须以 install.exe 结尾！RustDesk 的安装器靠这个后缀判断"要执行安装"，
+          # 否则会当成绿色版直接运行（表现为"打开是绿色版 + 提示未安装"）。
+          cp ./target/release/rustdesk-portable-packer.exe "dist/连连控远程_v${VERSION}_x64_install.exe"
+          cp ./target/release/rustdesk-portable-packer.exe "dist/LLK-Remote-v${VERSION}-x64-install.exe"
+          ls -l dist/
 
       - name: 打包免安装绿色版
         shell: pwsh
