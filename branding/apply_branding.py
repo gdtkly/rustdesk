@@ -111,6 +111,23 @@ def main():
         f'pub const RS_PUB_KEY: &str = "{key}";',
         "RS_PUB_KEY")
 
+    # ---------- 1b. 预置服务器选项 ----------
+    # 只改常量的话，"设置→网络→ID/中继服务器" 里四个框是空的（看着像坏了），
+    # 因为界面读的是 option，不是常量。这里把 option 的默认值也写进去。
+    inject = (
+        "    // ---- 连连控远程 品牌化注入：预置自建服务器 ----\n"
+        "    {\n"
+        "        let mut ds = hbb_common::config::DEFAULT_SETTINGS.write().unwrap();\n"
+        f'        ds.insert("custom-rendezvous-server".to_owned(), "{ip}".to_owned());\n'
+        f'        ds.insert("relay-server".to_owned(), "{ip}".to_owned());\n'
+        f'        ds.insert("key".to_owned(), "{key}".to_owned());\n'
+        "    }\n"
+    )
+    sub("src/common.rs",
+        r'(?m)^pub fn load_custom_client\(\) \{',
+        lambda m: m.group(0) + "\n" + inject,
+        "common.rs/预置服务器选项")
+
     # ---------- 2. Windows 版本信息 ----------
     # 2a. Cargo.toml 里 winres / bundle 段
     sub("Cargo.toml",
