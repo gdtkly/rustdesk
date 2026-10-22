@@ -173,6 +173,10 @@ jobs:
 
       - name: 生成自解压 EXE 安装包
         shell: bash
+        env:
+          # Windows runner 的 Python 默认 cp1252 输出，打印中文路径会直接崩
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
           ls -l ./rustdesk/*.exe
